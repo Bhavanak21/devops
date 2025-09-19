@@ -1,0 +1,10 @@
+databaseChangeLog:
+- include:
+    file: DEV_FLASH_MART.STORE_ACTVT_MART.VW_MDL_MMX_DETAIL_CICD_Test.sql
+    relativeToChangelogFile: true
+- include:
+    file: test1.sql
+    relativeToChangelogFile: true
+- include:
+    file: test2.sql
+    relativeToChangelogFile: true
