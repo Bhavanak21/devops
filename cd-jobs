@@ -1,0 +1,163 @@
+name: CD - Liquibase Snowflake
+
+
+on:
+    workflow_call:
+        inputs:
+            PRODUCT_NAME:
+                required: true
+                type: string
+            ENVIRONMENT:
+                required: true
+                type: string
+            FOLDER:
+                required: true
+                type: string
+            CHANGELOG_PATH:
+                required: true
+                type: string
+            TARGET_DATABASE:
+                required: false
+                type: string
+            TARGET_SCHEMA:
+                required: false
+                type: string
+            LIQUIBASE_PROPERTIES:
+                required: false
+                type: string
+        secrets:
+            SNOWFLAKE_PASSWORD:
+                required: true
+
+jobs:
+    echo-inputs:
+        runs-on: github-aks-arc-runners-dev-1
+        environment: ${{ inputs.ENVIRONMENT }}
+        steps:
+            - name: checkout repo
+              uses: actions/checkout@v3
+
+            - name: Echo Inputs
+              id: echo_inputs
+              run: |
+                echo "Product Name=${{ inputs.PRODUCT_NAME }}"
+                echo "Environment=${{ inputs.ENVIRONMENT }}"
+                echo "Folder=${{ inputs.FOLDER }}"
+                echo "ChangelogPath=${{ inputs.CHANGELOG_PATH }}"
+                echo "Target Database=${{ inputs.TARGET_DATABASE }}"
+                echo "Target Schema=${{ inputs.TARGET_SCHEMA }}"
+                echo "Liquibase Properties=${{ inputs.LIQUIBASE_PROPERTIES }}"
+
+            - name: ECHO SECRETS
+              id: sf-secret
+              run: |
+                LIQUIBASE_URL=${{ vars.SNOWFLAKE_URL }}
+                LIQUIBASE_USER=${{ vars.SNOWFLAKE_USERNAME }}
+                LIQUIBASE_PASSWORD=${{ secrets.SNOWFLAKE_PASSWORD }}
+                LIQUIBASE_ROLE=${{ vars.SNOWFLAKE_ROLE }}
+                LIQUIBASE_DATABASE=${{ inputs.TARGET_DATABASE }}
+                LIQUIBASE_SCHEMA=${{ inputs.TARGET_SCHEMA }}
+                LIQUIBASE_WAREHOUSE=${{ vars.SNOWFLAKE_WAREHOUSE }}
+
+                echo "Storing the secrets in the Github output"
+                echo "LIQUIBASE_URL=$LIQUIBASE_URL" >> $GITHUB_OUTPUT
+                echo "LIQUIBASE_USER=$LIQUIBASE_USER" >> $GITHUB_OUTPUT
+                echo "LIQUIBASE_SCHEMA=$LIQUIBASE_SCHEMA" >> $GITHUB_OUTPUT
+                echo "LIQUIBASE_WAREHOUSE=$LIQUIBASE_WAREHOUSE" >> $GITHUB_OUTPUT
+                echo "LIQUIBASE_ROLE=$LIQUIBASE_ROLE" >> $GITHUB_OUTPUT
+                echo "LIQUIBASE_PASSWORD=$LIQUIBASE_PASSWORD" >> $GITHUB_OUTPUT
+                echo "LIQUIBASE_DATABASE=$LIQUIBASE_DATABASE" >> $GITHUB_OUTPUT
+
+                echo "LIQUIBASE_URL=$LIQUIBASE_URL"
+                echo "LIQUIBASE_USER=$LIQUIBASE_USER"
+                echo "LIQUIBASE_SCHEMA=$LIQUIBASE_SCHEMA"
+                echo "LIQUIBASE_WAREHOUSE=$LIQUIBASE_WAREHOUSE"
+                echo "LIQUIBASE_ROLE=$LIQUIBASE_ROLE"
+                echo "LIQUIBASE_DATABASE=$LIQUIBASE_DATABASE"
+
+            - name: Check liquibase version
+              run: |
+                echo "Checking Liquibase version..."
+                liquibase --version
+
+            - name: Liquibase Count Changesets before update
+              id: before
+              run: |
+                  echo "Running Liquibase Count Changesets before update"
+                  before_count=$(liquibase --url="${{ steps.sf-secret.outputs.LIQUIBASE_URL }}?warehouse=${{ steps.sf-secret.outputs.LIQUIBASE_WAREHOUSE }}&db=${{ inputs.TARGET_DATABASE }}&schema=${{ steps.sf-secret.outputs.LIQUIBASE_SCHEMA }}&role=${{ steps.sf-secret.outputs.LIQUIBASE_ROLE }}" \
+                  --username="${{ steps.sf-secret.outputs.LIQUIBASE_USER }}" \
+                  --password="${{ steps.sf-secret.outputs.LIQUIBASE_PASSWORD }}" \
+                  --changelog-file="${{ inputs.CHANGELOG_PATH }}" \
+                  execute-sql --sql="SELECT COUNT(ID) FROM DATABASECHANGELOG" --output-file=before_count.txt)
+  
+                  before_count=$(sed -n '3p' before_count.txt | tr -d '[:space:]|')
+  
+                  echo "Changesets before update: $before_count"
+                  if [[ -z "$before_count" || ! "$before_count" =~ ^[0-9]+$ ]]; then
+                    echo "Error: Invalid count value: $before_count"
+                    # exit 1
+                  fi
+                  echo "before_count=$before_count" >> $GITHUB_OUTPUT
+
+            - name: Liquibase Deploy changesets to Snowflake
+              id: deploy
+              continue-on-error: true
+              run: | 
+                echo "Running Liquibase Deploy changesets to Snowflake"
+                echo "liquibase update --defaultsFile=${{ inputs.LIQUIBASE_PROPERTIES }} --changelog-file=${{ inputs.CHANGELOG_PATH }} --url=${{ steps.sf-secret.outputs.LIQUIBASE_URL }}?warehouse=${{ steps.sf-secret.outputs.LIQUIBASE_WAREHOUSE }}&db=${{ inputs.TARGET_DATABASE }}&schema=${{ steps.sf-secret.outputs.LIQUIBASE_SCHEMA }}&role=${{ steps.sf-secret.outputs.LIQUIBASE_ROLE }} --username=${{ steps.sf-secret.outputs.LIQUIBASE_USER }} --password=${{ steps.sf-secret.outputs.LIQUIBASE_PASSWORD }} --context=${{ inputs.TARGET_DATABASE }}"
+                liquibase update \
+                  --defaults-file=${{ inputs.LIQUIBASE_PROPERTIES }} \
+                  --changelog-file="${{ inputs.CHANGELOG_PATH }}" \
+                  --url="${{ steps.sf-secret.outputs.LIQUIBASE_URL }}?warehouse=${{ steps.sf-secret.outputs.LIQUIBASE_WAREHOUSE }}&db=${{ inputs.TARGET_DATABASE }}&schema=${{ steps.sf-secret.outputs.LIQUIBASE_SCHEMA }}&role=${{ steps.sf-secret.outputs.LIQUIBASE_ROLE }}" \
+                  --username="${{ steps.sf-secret.outputs.LIQUIBASE_USER }}" \
+                  --password="${{ steps.sf-secret.outputs.LIQUIBASE_PASSWORD }}" \
+                  --contexts="${{ inputs.TARGET_DATABASE }}.${{ inputs.TARGET_SCHEMA }}"  
+
+
+            - name: Liquibase Count Changesets after update
+              id: after
+              run: |
+                echo "Running Liquibase Count Changesets after update"
+                after_count=$(liquibase --url="${{ steps.sf-secret.outputs.LIQUIBASE_URL }}?warehouse=${{ steps.sf-secret.outputs.LIQUIBASE_WAREHOUSE }}&db=${{ inputs.TARGET_DATABASE }}&schema=${{ steps.sf-secret.outputs.LIQUIBASE_SCHEMA }}&role=${{ steps.sf-secret.outputs.LIQUIBASE_ROLE }}" \
+                --username="${{ steps.sf-secret.outputs.LIQUIBASE_USER }}" \
+                --password="${{ steps.sf-secret.outputs.LIQUIBASE_PASSWORD }}" \
+                --changelog-file="${{ inputs.CHANGELOG_PATH }}" \
+                execute-sql --sql="SELECT COUNT(ID) FROM DATABASECHANGELOG" --output-file=after_count.txt)
+
+                after_count=$(sed -n '3p' after_count.txt | tr -d '[:space:]|')
+
+                echo "Changesets after update: $after_count"
+                if [[ -z "$after_count" || ! "$after_count" =~ ^[0-9]+$ ]]; then
+                  echo "Error: Invalid count value: $after_count"
+                  # exit 1
+                fi
+                echo "after_count=$after_count" >> $GITHUB_OUTPUT
+
+            - name: Liquibase Rollback if Deploy fails
+              if: steps.deploy.outcome == 'failure'
+              run: |
+                echo "Running Liquibase Rollback if Deploy fails"
+                before_count=${{ steps.before.outputs.before_count }}
+                after_count=${{ steps.after.outputs.after_count }}
+                if [[ -z "$before_count" || -z "$after_count" ]]; then
+                  echo "Error: Missing count values from previous steps."
+                  exit 1
+                fi
+
+                diff=$((after_count - before_count))
+                echo "Changesets Before : $before_count" 
+                echo "Changesets After : $after_count" 
+                echo "Changesets to rollback : $diff"
+                
+                if [ "$diff" -gt 0 ]; then
+                  echo "Rollback changesets to Snowflake"
+                  liquibase rollback-count \
+                    --defaults-file=${{ inputs.LIQUIBASE_PROPERTIES }} \
+                    --count=$diff \
+                    --url="${{ steps.sf-secret.outputs.LIQUIBASE_URL }}?warehouse=${{ steps.sf-secret.outputs.LIQUIBASE_WAREHOUSE }}&db=${{ inputs.TARGET_DATABASE }}&schema=${{ steps.sf-secret.outputs.LIQUIBASE_SCHEMA }}&role=${{ steps.sf-secret.outputs.LIQUIBASE_ROLE }}" \
+                    --username="${{ steps.sf-secret.outputs.LIQUIBASE_USER }}" \
+                    --password="${{ steps.sf-secret.outputs.LIQUIBASE_PASSWORD }}" \
+                    --context-filter="${{ inputs.TARGET_DATABASE }}.${{ inputs.TARGET_SCHEMA }}"
+                else
+                  echo "No changesets to rollback"
+                fi
