@@ -1,0 +1,124 @@
+name: ci-config job
+
+on:
+    workflow_call:
+        inputs:
+            PRODUCT_NAME:
+                required: true
+                type: string
+            ENVIRONMENT:
+                required: true
+                type: string
+            FOLDER:
+                required: true
+                type: string
+            CHANGELOG_PATH:
+                required: true
+                type: string
+            TARGET_DATABASE:
+                required: false
+                type: string
+            TARGET_SCHEMA:
+                required: false
+                type: string
+            LIQUIBASE_PROPERTIES:
+                required: false
+                type: string
+        secrets:
+            SNOWFLAKE_PASSWORD:
+                required: true
+
+jobs:
+    echo-inputs:
+        runs-on: github-aks-arc-runners-dev-1
+        environment: ${{ inputs.ENVIRONMENT }}
+        steps:
+            - name: checkout repo
+              uses: actions/checkout@v3
+
+            - name: Echo Inputs
+              id: echo_inputs
+              run: |
+                echo "Product Name=${{ inputs.PRODUCT_NAME }}"
+                echo "Environment=${{ inputs.ENVIRONMENT }}"
+                echo "Folder=${{ inputs.FOLDER }}"
+                echo "ChangelogPath=${{ inputs.CHANGELOG_PATH }}"
+                echo "Target Database=${{ inputs.TARGET_DATABASE }}"
+                echo "Target Schema=${{ inputs.TARGET_SCHEMA }}"
+                echo "Liquibase Properties=${{ inputs.LIQUIBASE_PROPERTIES }}"
+
+            - name: ECHO SECRETS
+              id: sf-secret
+              run: |
+                LIQUIBASE_URL=${{ vars.SNOWFLAKE_URL }}
+                LIQUIBASE_USER=${{ vars.SNOWFLAKE_USERNAME }}
+                LIQUIBASE_PASSWORD=${{ secrets.SNOWFLAKE_PASSWORD }}
+                LIQUIBASE_ROLE=${{ vars.SNOWFLAKE_ROLE }}
+                LIQUIBASE_DATABASE=${{ inputs.TARGET_DATABASE }}
+                LIQUIBASE_SCHEMA=${{ inputs.TARGET_SCHEMA }}
+                LIQUIBASE_WAREHOUSE=${{ vars.SNOWFLAKE_WAREHOUSE }}
+
+                echo "Storing the secrets in the Github output"
+                echo "LIQUIBASE_URL=$LIQUIBASE_URL" >> $GITHUB_OUTPUT
+                echo "LIQUIBASE_USER=$LIQUIBASE_USER" >> $GITHUB_OUTPUT
+                echo "LIQUIBASE_SCHEMA=$LIQUIBASE_SCHEMA" >> $GITHUB_OUTPUT
+                echo "LIQUIBASE_WAREHOUSE=$LIQUIBASE_WAREHOUSE" >> $GITHUB_OUTPUT
+                echo "LIQUIBASE_ROLE=$LIQUIBASE_ROLE" >> $GITHUB_OUTPUT
+                echo "LIQUIBASE_PASSWORD=$LIQUIBASE_PASSWORD" >> $GITHUB_OUTPUT
+                echo "LIQUIBASE_DATABASE=$LIQUIBASE_DATABASE" >> $GITHUB_OUTPUT
+
+                echo "LIQUIBASE_URL=$LIQUIBASE_URL"
+                echo "LIQUIBASE_USER=$LIQUIBASE_USER"
+                echo "LIQUIBASE_SCHEMA=$LIQUIBASE_SCHEMA"
+                echo "LIQUIBASE_WAREHOUSE=$LIQUIBASE_WAREHOUSE"
+                echo "LIQUIBASE_ROLE=$LIQUIBASE_ROLE"
+                echo "LIQUIBASE_DATABASE=$LIQUIBASE_DATABASE"
+
+            - name: Check liquibase version
+              run: |
+                echo "Checking Liquibase version..."
+                liquibase --version
+
+            - name: Liquibase Status
+              run: |
+                echo "Running Liquibase Status"
+                
+                echo  "liquibase url: ${{ steps.sf-secret.outputs.LIQUIBASE_URL }}"
+                echo  "liquibase user: ${{ steps.sf-secret.outputs.LIQUIBASE_USER }}"
+                echo  "liquibase schema: ${{ steps.sf-secret.outputs.LIQUIBASE_SCHEMA }}"
+                echo  "changelog file:${{ inputs.CHANGELOG_PATH }}"
+                changelog_file="${{ inputs.CHANGELOG_PATH }}"
+                target_database="${{ inputs.TARGET_DATABASE }}"
+                echo "Navigating to CONFIG_PATH: $changelog_file"
+                if [ -f "$changelog_file" ]; then
+                  echo "File exists: $changelog_file"
+                  # cat "$changelog_file"
+                else
+                  echo "File not found: $changelog_file"
+                  exit 1
+                fi
+
+                echo "liquibase status --defaults-file=${{ inputs.LIQUIBASE_PROPERTIES }} --changelog-file=$changelog_file --url=${{ steps.sf-secret.outputs.LIQUIBASE_URL }}?warehouse=${{ steps.sf-secret.outputs.LIQUIBASE_WAREHOUSE }}&db=${{ steps.sf-secret.outputs.LIQUIBASE_DATABASE }}&schema=${{ steps.sf-secret.outputs.LIQUIBASE_SCHEMA }}&role=${{ steps.sf-secret.outputs.LIQUIBASE_ROLE }} --username=${{ steps.sf-secret.outputs.LIQUIBASE_USER }} --password=${{ steps.sf-secret.outputs.LIQUIBASE_PASSWORD }} --context=${{ inputs.TARGET_DATABASE }}"
+
+                echo "===========================================EXECUTING THE SCRIPT===================="
+                liquibase status \
+                  --defaults-file=${{ inputs.LIQUIBASE_PROPERTIES }} \
+                  --changelog-file="$changelog_file" \
+                  --url="${{ steps.sf-secret.outputs.LIQUIBASE_URL }}?warehouse=${{ steps.sf-secret.outputs.LIQUIBASE_WAREHOUSE }}&db=${{ steps.sf-secret.outputs.LIQUIBASE_DATABASE }}&schema=${{ steps.sf-secret.outputs.LIQUIBASE_SCHEMA }}&role=${{ steps.sf-secret.outputs.LIQUIBASE_ROLE }}" \
+                  --username="${{ steps.sf-secret.outputs.LIQUIBASE_USER }}" \
+                  --password="${{ steps.sf-secret.outputs.LIQUIBASE_PASSWORD }}" \
+                  --context-filter="${{ inputs.TARGET_DATABASE }}.${{ inputs.TARGET_SCHEMA }}"
+                echo "Liquibase Status completed successfully"
+
+            - name: Validate Changesets
+              run: |
+                echo "Running Liquibase Validate Changesets"
+                echo "liquibase validate --defaults-file=${{ inputs.LIQUIBASE_PROPERTIES }} --changelog-file=${{ inputs.CHANGELOG_PATH }} --url=${{ steps.sf-secret.outputs.LIQUIBASE_URL }}?warehouse=${{ steps.sf-secret.outputs.LIQUIBASE_WAREHOUSE }}&db=${{ steps.sf-secret.outputs.LIQUIBASE_DATABASE }}&schema=${{ steps.sf-secret.outputs.LIQUIBASE_SCHEMA }}&role=${{ steps.sf-secret.outputs.LIQUIBASE_ROLE }} --username=${{ steps.sf-secret.outputs.LIQUIBASE_USER }} --password=${{ steps.sf-secret.outputs.LIQUIBASE_PASSWORD }} --context=${{ inputs.TARGET_DATABASE }}"
+                liquibase validate \
+                  --changelog-file="${{ inputs.CHANGELOG_PATH }}" \
+                  --url="${{ steps.sf-secret.outputs.LIQUIBASE_URL }}?warehouse=${{ steps.sf-secret.outputs.LIQUIBASE_WAREHOUSE }}&db=${{ steps.sf-secret.outputs.LIQUIBASE_DATABASE }}&schema=${{ steps.sf-secret.outputs.LIQUIBASE_SCHEMA }}&role=${{ steps.sf-secret.outputs.LIQUIBASE_ROLE }}" \
+                  --username="${{ steps.sf-secret.outputs.LIQUIBASE_USER }}" \
+                  --password="${{ steps.sf-secret.outputs.LIQUIBASE_PASSWORD }}"
+                echo "Liquibase Validate Changesets completed successfully"
+
+           
