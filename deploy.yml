@@ -1,0 +1,84 @@
+name: Workflow Trigger Liquibase Product Repository
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'test'
+        type: choice
+        options:
+          - test
+          - develop
+          - qa
+          - uat
+          - main
+
+      folder:
+        description: 'Project folder'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - project1
+          - project2
+          - project3
+          - project4
+
+      target_database:
+          description: 'Target database'
+          required: false
+          default: 'DEV_FLASH_MART'
+          type: choice
+          options:
+            - DEV_FLASH_MART
+            - DEV_PAYROLL_MART
+            - QA_FLASH_MART
+            - QA_PAYROLL_MART
+            - UAT_FLASH_MART
+            - UAT_PAYROLL_MART
+            - PROD_FLASH_MART
+            - PROD_PAYROLL_MART  
+
+      target_schema:
+          description: 'Target schema'
+          required: false
+          default: 'STORE_ACTVT_MART'
+          type: choice
+          options:
+            - STORE_ACTVT_MART
+            - INTM_ETL
+            - SHRINK
+            - DEV_PROD_RECALL_MART
+            - QA_PROD_RECALL_MART
+            - PROD_PROD_RECALL_MART
+
+
+jobs:
+  ci-jobs:
+    uses: tjxinc/eda-snowflake-core-cicd-liquibase/.github/workflows/ci-job.yml@feature-core-product-repo-folder-implementation
+    with:
+      PRODUCT_NAME: ${{ github.repository }}
+      ENVIRONMENT: ${{ github.event.inputs.environment }}
+      FOLDER: ${{ github.event.inputs.folder }}
+      CHANGELOG_PATH: ${{ github.event.inputs.folder }}/master-changelog.yml
+      TARGET_DATABASE: ${{ github.event.inputs.target_database }}
+      TARGET_SCHEMA: ${{ github.event.inputs.target_schema }}
+      LIQUIBASE_PROPERTIES: liquibase-${{ github.event.inputs.environment }}.properties
+    secrets:
+      SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+
+  cd-job:
+    needs: ci-jobs
+    uses: tjxinc/eda-snowflake-core-cicd-liquibase/.github/workflows/cd-job.yml@feature-core-product-repo-folder-implementation
+    with:
+      PRODUCT_NAME: ${{ github.repository }}
+      ENVIRONMENT: ${{ github.event.inputs.environment }}
+      FOLDER: ${{ github.event.inputs.folder }}
+      CHANGELOG_PATH: ${{ github.event.inputs.folder }}/master-changelog.yml
+      TARGET_DATABASE: ${{ github.event.inputs.target_database }}
+      TARGET_SCHEMA: ${{ github.event.inputs.target_schema }}
+      LIQUIBASE_PROPERTIES: liquibase-${{ github.event.inputs.environment }}.properties
+    secrets:
+      SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
